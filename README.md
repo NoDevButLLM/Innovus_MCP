@@ -1,6 +1,6 @@
 # Innovus MCP
 
-Give coding agents access to a real Innovus session through MCP, with human control of the same terminal through tmux.
+Move on towards agentic Digital IC Design!! Give coding agents access to a real Innovus session through MCP, with human control of the same terminal through tmux.
 
 - **FastMCP** provides a stdio interface. Submit queries with `query_tcl` and changes with `mutate_tcl`.
 - The **broker** manages the job queue, input ownership, and results; **tmux** hosts the Innovus terminal.
