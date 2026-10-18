@@ -1,0 +1,32 @@
+[
+  {
+    "name": "place-opt",
+    "command": "place_opt_design",
+    "prompt": "请你通过innovus mcp帮我查询一下place_opt_design命令的主要用法",
+    "status": "ok",
+    "detail": "full",
+    "repetitions": 3
+  },
+  {
+    "name": "dbget",
+    "max_mcp_calls": 2,
+    "allow_paging": true,
+    "command": "dbGet",
+    "prompt": "请通过 Innovus MCP 查询 dbGet 命令的主要用法，给出常见选项和简短示例。",
+    "status": "ok",
+    "detail": "full"
+  },
+  {
+    "name": "syntax",
+    "command": "place_opt_design",
+    "prompt": "请通过 Innovus MCP 只查询 place_opt_design 的简短帮助，只需要语法和参数简表。",
+    "status": "ok",
+    "detail": "summary"
+  },
+  {
+    "name": "missing",
+    "command": "imcp_no_such_command_72941",
+    "prompt": "请通过 Innovus MCP 查询 imcp_no_such_command_72941 的主要用法；如果当前版本不存在，请直接说明。",
+    "status": "unavailable"
+  }
+]

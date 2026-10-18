@@ -68,12 +68,15 @@
 只有用户要求测试或验证时，才新增或运行测试。按改动范围可执行静态检查：
 
 ```bash
-.venv/bin/ruff check src
-.venv/bin/ruff format --check src
+"$HOME/.local/innovus_MCP/venv/bin/ruff" check src tests validation scripts/validate_innovus.py
+"$HOME/.local/innovus_MCP/venv/bin/ruff" format --check src tests validation scripts/validate_innovus.py
 bash -n scripts/install.sh
+bash -n scripts/test.sh
 ```
 
-这些命令依赖本地开发环境；干净克隆可能尚未创建 `.venv`。
+使用 `bash scripts/install.sh --dev` 安装检查依赖，`bash scripts/test.sh` 默认使用该安装环境。
+`INNOVUS_MCP_TEST_PYTHON` 可覆盖测试 Python；tmux 使用 `INNOVUS_MCP_TEST_TMUX`、`INNOVUS_MCP_TMUX` 或 PATH。
+测试和验证脚本不得依赖个人绝对路径或仓库中的 `.tools`、`.venv`；仓库资源通过脚本位置解析。
 
 用户要求真实验证时：
 
@@ -90,7 +93,7 @@ bash -n scripts/install.sh
 - `README.md` 的正文、标题、表格、示例说明及注释均使用英文。
 - Git commit message 的标题和正文均使用英文。
 - `opencode.json` 引用的指令文件必须随仓库和安装包提供，不能依赖被忽略的文档目录。
-- `docs/`、`tests/`、`validation/`、本机环境和生成数据当前由 `.gitignore` 排除；它们可能只存在于本地。
+- `tests/`、验证脚本及用例随仓库提交。`docs/`、本机环境、历史验证运行目录和生成数据由 `.gitignore` 排除。
 - 保留本地辅助文件，不把它们作为运行依赖，不在公开 README 中引用未提交的文件。
 - 按用户授权提交或推送，并检查明确的暂存文件清单。未经要求，不强制加入忽略文件或修改忽略策略。
 - 保留用户已有改动，不覆盖、回退无关文件，不将凭据、许可证信息或设计数据提交到远程。

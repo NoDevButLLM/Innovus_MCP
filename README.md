@@ -15,6 +15,7 @@ Give coding agents access to a real Innovus session through MCP, with human cont
 - [5. MCP Tools](#5-mcp-tools)
 - [6. Command Handling and Optimizations](#6-command-handling-and-optimizations)
 - [7. Data Directories and Updates](#7-data-directories-and-updates)
+- [8. Tests and Validation](#8-tests-and-validation)
 
 ## 1. Installation
 
@@ -417,3 +418,16 @@ You can also set `INNOVUS_MCP_ROOT` consistently in the session startup and agen
 After updating the source, run `bash scripts/install.sh` again. **Existing brokers do not reload code.** Save any required design state, then use a new session or stop and recreate the old one. Point the agent configuration to the corresponding session name.
 
 V1 does not provide memory, automatic recovery, or command protection. Closing an MCP client does not stop independently running jobs. If the broker exits, tmux and capture processes may continue, but this version cannot rebuild the broker to take over those processes. Copying session files to another machine preserves records; it cannot restore a running Innovus database or process.
+
+## 8. Tests and Validation
+
+Install the development dependencies in the same HOME environment as the CLI, then run tests from a checkout:
+
+```bash
+bash scripts/install.sh --dev
+bash scripts/test.sh -q
+```
+
+The runner defaults to `~/.local/innovus_MCP/venv/bin/python` and tests the installed package. Set `INNOVUS_MCP_TEST_PYTHON` to use another environment. tmux is selected from `INNOVUS_MCP_TEST_TMUX`, then `INNOVUS_MCP_TMUX`, then PATH; tests do not require a repository-local Python or tmux installation. Integrations use disposable fake-Innovus sessions, and real Innovus checks are opt-in.
+
+See the [test guide](tests/README.md) for coverage, configuration, and real-session checks. The [OpenCode validation guide](validation/opencode/README.md) describes direct MCP checks and agent runs with exported call traces. Real validation artifacts default to `~/.local/innovus_MCP/validation`, with an `--output` override. Test code and scripts are tracked; generated logs, exported conversations, and local environments are excluded from Git.

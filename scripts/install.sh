@@ -3,7 +3,32 @@
 set -euo pipefail
 
 innovus_release_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-innovus_package="${1:-$innovus_release_dir}"
+innovus_package="$innovus_release_dir"
+innovus_package_set=false
+innovus_install_dev=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dev) innovus_install_dev=true ;;
+        -h|--help)
+            printf 'Usage: bash scripts/install.sh [--dev] [package-path]\n'
+            printf 'Install under ~/.local/innovus_MCP/venv; --dev includes pytest and Ruff.\n'
+            exit 0
+            ;;
+        -*) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
+        *)
+            if [[ "$innovus_package_set" == true ]]; then
+                printf 'Only one package path may be supplied.\n' >&2
+                exit 2
+            fi
+            innovus_package="$1"
+            innovus_package_set=true
+            ;;
+    esac
+    shift
+done
+if [[ "$innovus_install_dev" == true ]]; then
+    innovus_package="${innovus_package}[dev]"
+fi
 innovus_python="${INNOVUS_MCP_PYTHON:-python3.11}"
 if ! command -v "$innovus_python" >/dev/null 2>&1; then
     innovus_python="${INNOVUS_MCP_PYTHON:-python3}"

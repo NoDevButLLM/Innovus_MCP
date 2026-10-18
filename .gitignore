@@ -3,10 +3,9 @@
 /docs/
 /agentic_innovus_initial_proposal.md
 
-# Local tests, validation flows, and environment snapshot
-/tests/
-/validation/
-/scripts/validate_innovus.py
+# Local validation results and environment snapshot
+/validation/opencode/runs/
+/validation/opencode/.state/
 /requirements.lock
 
 # Virtual environments, downloaded tools, and session artifacts
