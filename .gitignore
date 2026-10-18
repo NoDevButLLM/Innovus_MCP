@@ -1,0 +1,61 @@
+# Local documentation and proposals
+/doc/
+/docs/
+/agentic_innovus_initial_proposal.md
+
+# Local tests, validation flows, and environment snapshot
+/tests/
+/validation/
+/scripts/validate_innovus.py
+/requirements.lock
+
+# Virtual environments, downloaded tools, and session artifacts
+/.venv/
+/venv/
+/env/
+/.tools/
+/.innovus-mcp/
+/sessions/
+
+# Python caches and packaging output
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+build/
+dist/
+
+# Local agent, editor, and credential configuration
+/.agents/
+/.codex/
+/.aws/
+/.opencode/
+/.idea/
+/.vscode/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Generated Innovus output and temporary files
+*.log
+*.log.*
+*.logv
+*.cmd
+*.rpt
+*.enc
+*.enc.dat/
+*.swp
+*.swo
+*~
+.DS_Store
