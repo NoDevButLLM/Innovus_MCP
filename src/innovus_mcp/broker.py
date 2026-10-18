@@ -54,8 +54,22 @@ class Broker:
         self.stream_tail = b""
         self.prompt = re.compile(self.config.get("prompt", DEFAULT_PROMPT).encode())
         self.prefix = f"\x1eIMCP:{self.config['token']}:".encode()
-        self.marker = re.compile(
-            re.escape(self.prefix) + rb"(CAPTURE|READY|START|DONE|RELEASE):([a-z0-9]+)\x1f"
+        # Accept legacy frames as well as nonprinting OSC frames. Each envelope
+        # is consumed in full so neither its bytes nor terminal banners enter job output.
+        self.markers = tuple(
+            (
+                prefix,
+                terminator,
+                re.compile(
+                    re.escape(prefix)
+                    + rb"(CAPTURE|READY|START|DONE|RELEASE):([a-z0-9]+)"
+                    + re.escape(terminator)
+                ),
+            )
+            for prefix, terminator in (
+                (self.prefix, b"\x1f"),
+                (f"\x1b]777;IMCP:{self.config['token']}:".encode(), b"\x07"),
+            )
         )
         self.start_seen = asyncio.Event()
         self.prompt_seen = asyncio.Event()
@@ -133,7 +147,7 @@ class Broker:
             cfg = self.directory / "tmux.conf"
             cfg.write_text(
                 "set -g exit-unattached off\nset -g remain-on-exit on\n"
-                "set -g history-limit 2000\nset -g window-size manual\n"
+                "set -g history-limit 2000\nset -g window-size smallest\n"
                 "set -g status-right 'MANAGED | C-b h: take control'\n"
             )
             pane = await self.tmux.cmd(
@@ -174,7 +188,7 @@ class Broker:
             driver = Path(__file__).parent / "tcl" / "driver.tcl"
             identity = uuid.uuid4().hex
             command = (
-                f"source {tcl_word(str(driver))}; ::innovus_mcp::init "
+                f"source {tcl_word(str(driver))} -quiet; ::innovus_mcp::init "
                 f"{tcl_word(str(self.directory))} {self.config['token']} {identity}"
             )
             await self.exchange(command, identity)
@@ -224,26 +238,32 @@ class Broker:
 
     def parse_stream(self):
         while self.buffer:
-            start = self.buffer.find(self.prefix)
-            if start == -1:
+            candidates = [
+                (start, terminator, marker)
+                for prefix, terminator, marker in self.markers
+                if (start := self.buffer.find(prefix)) != -1
+            ]
+            if not candidates:
                 keep = 0
-                for n in range(1, min(len(self.prefix), len(self.buffer)) + 1):
-                    if self.buffer.endswith(self.prefix[:n]):
-                        keep = n
+                for prefix, _, _ in self.markers:
+                    for n in range(1, min(len(prefix), len(self.buffer)) + 1):
+                        if self.buffer.endswith(prefix[:n]):
+                            keep = max(keep, n)
                 length = len(self.buffer) - keep
                 if length:
                     self.data(self.buffer[:length], self.buffer_offset)
                     self.buffer = self.buffer[length:]
                     self.buffer_offset += length
                 break
+            start, terminator, marker = min(candidates, key=lambda candidate: candidate[0])
             if start:
                 self.data(self.buffer[:start], self.buffer_offset)
                 self.buffer = self.buffer[start:]
                 self.buffer_offset += start
-            end = self.buffer.find(b"\x1f")
+            end = self.buffer.find(terminator)
             if end == -1 and len(self.buffer) < 200:
                 break
-            match = self.marker.match(self.buffer)
+            match = marker.match(self.buffer)
             if not match:
                 self.data(self.buffer[:1], self.buffer_offset)
                 self.buffer = self.buffer[1:]

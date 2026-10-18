@@ -16,7 +16,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/innovus_mcp/cli.py` | `start`、`status`、`serve`、`attach`、`stop`、`delete` |
+| `src/innovus_mcp/cli.py` | `start`、`status`、`list`、`serve`、`attach`、`stop`、`delete` |
 | `src/innovus_mcp/mcp_server.py` | FastMCP 工具、参数 schema、说明及 broker 转发 |
 | `src/innovus_mcp/broker.py` | 作业队列、控制权、输出索引和完成判定 |
 | `src/innovus_mcp/tmux_backend.py` | tmux 命令、输入投递与终端连接 |
@@ -60,6 +60,7 @@
 - session 默认保存在 `~/.local/innovus_MCP/sessions`，覆盖优先级为 `--root`、`INNOVUS_MCP_ROOT`、默认值。
 - `start --cwd` 默认使用调用时的当前目录。设计目录、session 数据和安装环境分别管理。
 - `stop` 不自动保存设计。`delete` 仅删除满足停止条件的会话记录，保持目录及存活检查。
+- `stop --all`、`delete --all` 仅作用于选定 session root，保留逐会话检查、错误和部分成功结果；不要因用户要求添加批量功能而实际停止或删除用户会话。
 - 修改源码不会热更新已运行 broker；需要新会话加载更新。不要为部署改动擅自重启用户会话。
 
 ## 检查与验证

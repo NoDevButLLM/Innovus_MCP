@@ -12,7 +12,7 @@ def main():
     config = json.loads((root / "session.json").read_text())
     while not (root / "capture.ready").exists():
         time.sleep(0.02)
-    os.write(1, f"\x1eIMCP:{config['token']}:CAPTURE:startup\x1f\n".encode())
+    os.write(1, f"\x1b]777;IMCP:{config['token']}:CAPTURE:startup\x07".encode())
     while not (root / "launch.ready").exists():
         time.sleep(0.02)
     os.chdir(config["cwd"])

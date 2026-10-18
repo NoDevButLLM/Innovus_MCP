@@ -69,6 +69,14 @@ innovus-mcp status --session chip
 
 **Without `--cwd`, Innovus uses the directory from which you run `start`.** The default launch command is `innovus -no_gui`.
 
+Add `--gui` to launch Innovus with its graphical interface instead:
+
+```bash
+innovus-mcp start --session chip_gui --gui
+```
+
+With `--gui`, the default command is `innovus`; without it, `-no_gui` is added. The GUI inherits the shell's display environment, so configure a working graphical display (such as `DISPLAY` and X11 authentication) before starting. MCP and tmux still connect to the same session.
+
 You can also specify the working directory, tmux executable, and Innovus launch arguments:
 
 ```bash
@@ -79,6 +87,14 @@ innovus-mcp start --session chip \
 ```
 
 Arguments after `--` specify the executable and its arguments. `start` returns immediately; wait until `status` reports `state: ready` before submitting agent commands. Use tmux to view startup and license output.
+
+The GUI switch also applies to an explicitly supplied executable named `innovus`, including an absolute path: `--gui` removes `-no_gui`, while omitting `--gui` ensures it is present. Put `--gui` before `--`:
+
+```bash
+innovus-mcp start --session chip_gui --gui -- /path/to/innovus
+```
+
+Other custom launch commands, such as wrapper scripts, are passed through unchanged and must configure their own GUI mode.
 
 Each session has its own Innovus process and tmux server. Humans and agents in the same session share the database, Tcl variables, and working directory. `start` will not overwrite an existing session directory.
 
@@ -150,14 +166,26 @@ Use the same launch arguments in your client's MCP configuration format:
 | --- | --- | --- |
 | `start` | Create a session and launch the broker, tmux, and Innovus | `innovus-mcp start --session chip` |
 | `status` | Show state, ownership, queue, and tmux attach command | `innovus-mcp status --session chip` |
+| `list` | List running sessions under the selected session root | `innovus-mcp list` |
 | `serve` | Provide the MCP stdio service for an agent | `innovus-mcp serve --session chip` |
 | `attach` | Connect to the real Innovus terminal, initially read-only | `innovus-mcp attach --session chip` |
-| `stop` | Stop the session while retaining logs and job records | `innovus-mcp stop --session chip` |
-| `delete` | Permanently delete records for a stopped session | `innovus-mcp delete --session chip` |
+| `stop` | Stop one or all sessions while retaining logs and job records | `innovus-mcp stop --session chip` / `innovus-mcp stop --all` |
+| `delete` | Permanently delete records for one or all stopped sessions | `innovus-mcp delete --session chip` / `innovus-mcp delete --all` |
 
-`--session` defaults to `default`, except that `delete` requires an explicit session name. Common `start` options include `--cwd`, `--tmux`, `--startup-timeout` (default: 180 seconds), and `--queue-size` (default: 32 pending jobs).
+`--session` defaults to `default` for commands targeting a single session, except that `delete` requires either `--session` or `--all`. For `stop` and `delete`, `--session` and `--all` are mutually exclusive. `list` takes no `--session` argument. Common `start` options include `--cwd`, `--gui` (default: off), `--tmux`, `--startup-timeout` (default: 180 seconds), and `--queue-size` (default: 32 pending jobs).
 
 Agents normally launch `serve` automatically. Running it manually in a terminal waits for MCP messages. Use `attach` to enter Innovus Tcl commands yourself.
+
+### List Running Sessions
+
+```bash
+innovus-mcp list
+innovus-mcp --root /data/eda_sessions list
+```
+
+`list` returns JSON with `root`, `count`, `sessions`, and `errors`. Each session includes its name, state, ownership, working directory, launch command, active job, queue, artifact directory, and tmux attach command. It uses the same root precedence as other commands and sorts sessions by name. A missing root returns an empty list without creating directories.
+
+The command checks broker status and tmux pane liveness concurrently, with up to eight sessions checked at once and a two-second deadline for each probe. It includes sessions still starting and live panes whose broker is unavailable (`broker_available=false`, `state="unavailable"`); ownership and job information are unknown for those sessions. A retained dead pane does not count as running. Stopped sessions and stale records with no live pane are excluded. Invalid records or inconclusive pane checks appear in `errors`, so a partial listing remains usable. Symlinked session directories are skipped. Listing does not submit Innovus commands or change input ownership.
 
 ### Attach, Take Control, and Release
 
@@ -168,7 +196,7 @@ innovus-mcp attach --session chip
 You can also run the `attach_command` returned by `start` or `status`, which has this form:
 
 ```bash
-/path/to/tmux -S /recorded/tmux.sock attach-session -r -t innovus
+/path/to/tmux -S /recorded/tmux.sock attach-session -f read-only -t innovus
 ```
 
 Sessions use separate sockets. The tmux target is usually named `innovus`; use the complete command returned for your session.
@@ -186,6 +214,27 @@ Sessions use separate sockets. The tmux target is usually named `innovus`; use t
 
 Press `Ctrl+B`, then `d` to detach. Detaching or losing SSH during human control keeps the agent paused. Reconnect, take control, and explicitly release it to resume the agent. Human commands are captured in the terminal log but do not create individual managed jobs.
 
+### Terminal Output
+
+Managed jobs display a short job ID, an indented script preview, and a completion line:
+
+```text
+[innovus-mcp] BEGIN job=05d7deac
+    puts "TOP:[dbGet top.name]"
+    puts "INSTS:[llength [dbGet top.insts.name]]"
+TOP:ibex_core
+INSTS:15695
+
+[innovus-mcp] END job=05d7deac status=succeeded tcl_code=0
+innovus 19>
+```
+
+The preview preserves script line breaks and shows at most six lines of 76 characters each, with a notice when shortened. The complete script remains in the job's `request.tcl`; execution is unchanged. The terminal may also echo the internal `::innovus_mcp::run` invocation. Start/end banners and previews are excluded from MCP job output, which retains the command's own output and separate Tcl result. The completion line reports Tcl status, not design correctness.
+
+Internal synchronization frames use a private OSC sequence consumed without display by tmux; their raw bytes remain in `pane.raw` for the broker. The parser accepts both this format and the legacy visible markers, including frames split across capture chunks. Completion still requires the marker, completion manifest, and returned Innovus prompt.
+
+The tmux window follows the smallest attached client instead of staying fixed at 240 columns. Generated attachment commands use `-f read-only` to let viewers affect pane size; tmux's `-r` also enables `ignore-size`, which prevents that resizing ([tmux manual](https://github.com/tmux/tmux/blob/3.7a/tmux.1)). These changes apply to new sessions after installation; existing brokers and loaded Tcl helpers require a new session to use them.
+
 ### Stop and Delete
 
 ```bash
@@ -197,9 +246,26 @@ innovus-mcp stop --session chip --force
 
 # Delete logs, jobs, and output files for a stopped session
 innovus-mcp delete --session chip
+
+# Stop all sessions under the selected root
+innovus-mcp stop --all
+
+# Force-stop all sessions, including busy sessions and those under human control
+innovus-mcp stop --all --force
+
+# Delete all stopped sessions; running sessions are refused individually
+innovus-mcp delete --all
+
+# Apply the same operations to a custom root
+innovus-mcp --root /data/eda_sessions stop --all
+innovus-mcp --root /data/eda_sessions delete --all
 ```
 
 Stopping does not save the design automatically. `delete` requires a recorded state of `stopped` and confirmation that both the broker and tmux have exited. It allows for the brief broker shutdown delay after `stop` and rejects symlink session directories. The design working directory and installation remain in place. After deletion, you can reuse the session name.
+
+`--all` takes a snapshot of session directories under the selected root, sorts them by name, and processes up to eight at once. It uses the same `--root` / `INNOVUS_MCP_ROOT` / HOME precedence as other commands. Symlinked directories are skipped; invalid session records produce individual errors. A missing or empty root succeeds with no results.
+
+Batch operations continue after individual failures and return JSON with `root`, `action`, per-session `results`, and `succeeded`, `skipped`, and `failed` counts. The exit code is 1 if any session fails, otherwise 0. `stop --all` skips sessions already confirmed stopped and preserves normal idle/ownership requirements unless `--force` is supplied. An unavailable broker is reported as a failure; force does not bypass the broker to kill orphaned processes. `delete --all` does not stop running sessions or bypass deletion checks. To remove all session records, run `stop --all` (with `--force` if needed), inspect its results, then run `delete --all`.
 
 ## 5. MCP Tools
 

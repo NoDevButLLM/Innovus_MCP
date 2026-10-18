@@ -60,7 +60,7 @@ class Tmux:
     async def readonly_writers(self):
         for client in await self.clients():
             if client["readonly"] != "1":
-                await self.cmd("switch-client", "-c", client["name"], "-r")
+                await self.cmd("refresh-client", "-t", client["name"], "-f", "read-only,!ignore-size")
 
     def attach_command(self):
         return shlex.join(self.attach_args(readonly=True))
@@ -71,7 +71,8 @@ class Tmux:
             "-S",
             self.socket,
             "attach-session",
-            *(["-r"] if readonly else []),
+            # -r also sets ignore-size, preventing a viewer from resizing the pane.
+            *(["-f", "read-only"] if readonly else []),
             "-t",
             "innovus",
         ]

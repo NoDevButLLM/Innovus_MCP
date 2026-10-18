@@ -6,7 +6,8 @@ namespace eval ::innovus_mcp {
 
 proc ::innovus_mcp::frame {kind id} {
     variable token
-    puts -nonewline stdout "\x1eIMCP:${token}:${kind}:${id}\x1f"
+    # tmux consumes this private OSC without painting it; pipe-pane retains its bytes.
+    puts -nonewline stdout "\x1b\]777;IMCP:${token}:${kind}:${id}\x07"
     flush stdout
 }
 
@@ -39,6 +40,25 @@ proc ::innovus_mcp::write_utf8 {path text} {
     close $channel
 }
 
+proc ::innovus_mcp::preview_script {script} {
+    set lines [split [string trim $script \n] \n]
+    set shown 0
+    set truncated 0
+    foreach line $lines {
+        if {$shown >= 6} {set truncated 1; break}
+        set line [string map [list "\t" "    " "\r" ""] $line]
+        # Display control characters as text, without changing the executed script.
+        regsub -all {[\x00-\x1f\x7f]} $line {?} line
+        if {[string length $line] > 76} {
+            set line "[string range $line 0 71] ..."
+            set truncated 1
+        }
+        puts "    $line"
+        incr shown
+    }
+    if {$truncated} {puts "    ... (preview shortened; full script in job artifacts)"}
+}
+
 proc ::innovus_mcp::run {id} {
     variable root
     set dir [file join $root jobs $id]
@@ -47,7 +67,9 @@ proc ::innovus_mcp::run {id} {
     fconfigure $channel -encoding utf-8 -translation lf
     set script [read $channel]
     close $channel
-    puts "\n\[innovus-mcp job $id\] [string range [string map {\n { }} $script] 0 255]"
+    set label [string range $id 0 7]
+    puts "\n\[innovus-mcp\] BEGIN job=$label"
+    ::innovus_mcp::preview_script $script
     flush stdout
     ::innovus_mcp::frame START $id
     set code [catch {uplevel #0 $script} result options]
@@ -64,5 +86,8 @@ proc ::innovus_mcp::run {id} {
     flush stdout
     catch {flush stderr}
     ::innovus_mcp::frame DONE $id
+    set status [expr {$code == 0 ? "succeeded" : "failed"}]
+    puts "\n\[innovus-mcp\] END job=$label status=$status tcl_code=$code"
+    flush stdout
     return ""
 }
