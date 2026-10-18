@@ -1,82 +1,112 @@
 # Innovus MCP
 
-A FastMCP server and command broker for one shared, tmux-hosted Innovus session.
+Give coding agents access to a real Innovus session through MCP, with human control of the same terminal through tmux.
 
-- Humans use the actual Innovus terminal through tmux, with explicit input ownership handoff.
-- Agents submit asynchronous Tcl jobs through separate `query_tcl` and `mutate_tcl` tools.
-- Long jobs continue after MCP disconnects. Console output and Tcl results have independent byte-based paging.
-- An independent `pipe-pane` consumer records output to disk, beyond tmux's scrollback limit.
+- **FastMCP** provides a stdio interface. Submit queries with `query_tcl` and changes with `mutate_tcl`.
+- The **broker** manages the job queue, input ownership, and results; **tmux** hosts the Innovus terminal.
+- Supports asynchronous jobs, output capture to disk, byte-based pagination, and command documentation without an interactive pager.
 
-V1 has no memory, recovery, or command protection system. Both Tcl tools accept unrestricted scripts; query intent is not read-only enforcement. Native commands are recorded as terminal activity, not individually tracked jobs.
+## Contents
 
-## Install
+- [1. Installation](#1-installation)
+- [2. Start an Innovus Session](#2-start-an-innovus-session)
+- [3. Connect a Coding Agent](#3-connect-a-coding-agent)
+- [4. CLI and Human Access Through tmux](#4-cli-and-human-access-through-tmux)
+- [5. MCP Tools](#5-mcp-tools)
+- [6. Command Handling and Optimizations](#6-command-handling-and-optimizations)
+- [7. Data Directories and Updates](#7-data-directories-and-updates)
 
-Requirements: Linux, Python 3.11+, tmux 3.2+, and an Innovus environment with a working license setup. The implementation uses the open-source `fastmcp` package, not a custom MCP protocol implementation.
+## 1. Installation
+
+### Requirements
+
+| Dependency | Requirement |
+| --- | --- |
+| Operating system | Linux |
+| Python | 3.11 or later |
+| tmux | 3.2 or later |
+| Innovus | Installed, with a working startup environment and license |
+| System `man` command | Required for full manual pages; summary help works without it |
+
+Innovus and its license are not included. The installer creates a Python virtual environment under HOME and installs the dependencies declared in `pyproject.toml`, including FastMCP 2.14.5.
+
+### Install
 
 ```bash
+git clone https://github.com/NoDevButLLM/Innovus_MCP.git
+cd Innovus_MCP
 bash scripts/install.sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The installer creates a standalone environment at `~/.local/innovus_MCP/venv` and the command `~/.local/bin/innovus-mcp`. It installs the package normally, so runtime imports and packaged Tcl files do not depend on the release checkout. Set `INNOVUS_MCP_PYTHON` if the Python executable has another name or location. After upgrading, start a new session to load the new broker code.
+Add the PATH setting to your shell startup configuration so future terminals and agents can find the command. Installation does not require sudo.
 
-Runtime tmux selection is `start --tmux`, then `INNOVUS_MCP_TMUX`, then the executable on PATH. A source checkout also offers `.tools/tmux/tmux` as a fallback when PATH has no tmux. Specify a compatible executable if the system version is too old.
+Installation paths:
 
-Local prerequisites may be installed under `.tools/` and the virtual environment under `.venv/`. These generated directories are ignored by Git. Runtime dependencies are declared in `pyproject.toml`.
+```text
+~/.local/bin/innovus-mcp           # CLI entry point
+~/.local/innovus_MCP/venv/         # Dedicated Python environment and installed package
+~/.local/innovus_MCP/sessions/     # Default session data directory
+```
 
-## Start and inspect a session
-
-Run from a shell where Innovus and its license environment are configured:
+If Python is not on your default PATH:
 
 ```bash
-innovus-mcp start --session chip --cwd /path/to/design -- innovus -no_gui
+INNOVUS_MCP_PYTHON=/path/to/python3.11 bash scripts/install.sh
+```
+
+The installer uses uv when available and falls back to pip. Python and Tcl runtime files are installed in the dedicated environment, so running MCP does not require entering the source repository.
+
+## 2. Start an Innovus Session
+
+Run these commands in a shell with the Innovus and license environment configured:
+
+```bash
+cd /path/to/design
+innovus-mcp start --session chip
 innovus-mcp status --session chip
 ```
 
-Start returns immediately. Wait until status reports `ready` before submitting work. Startup output and license diagnostics are visible by attaching read-only to tmux. Both start and status print an `attach_command` you can run directly.
+**Without `--cwd`, Innovus uses the directory from which you run `start`.** The default launch command is `innovus -no_gui`.
 
-Session artifacts default to `~/.local/innovus_MCP/sessions/<name>`, independent of the working directory or installation path. The CLI and MCP server use the same default. `--root` overrides `INNOVUS_MCP_ROOT`, which overrides the HOME default; explicit roots support `~`. Existing session names/artifacts are never overwritten automatically. For another machine, install the package there and start a new session; copying artifacts does not resume a running Innovus process.
-
-## Human access: native tmux
-
-Run the `attach_command` printed by `start` or `status` directly, for example:
+You can also specify the working directory, tmux executable, and Innovus launch arguments:
 
 ```bash
-/path/to/tmux -S /recorded/tmux.sock attach-session -r -t innovus
+innovus-mcp start --session chip \
+  --cwd /path/to/design \
+  --tmux /path/to/tmux \
+  -- /path/to/innovus -no_gui
 ```
 
-Or use the convenience connection command:
+Arguments after `--` specify the executable and its arguments. `start` returns immediately; wait until `status` reports `state: ready` before submitting agent commands. Use tmux to view startup and license output.
+
+Each session has its own Innovus process and tmux server. Humans and agents in the same session share the database, Tcl variables, and working directory. `start` will not overwrite an existing session directory.
+
+## 3. Connect a Coding Agent
+
+### OpenCode
+
+Start the Innovus session first, then configure OpenCode. OpenCode launches the MCP stdio service automatically.
+
+**From this repository:** the included [opencode.json](opencode.json) connects to `chip` and loads the [agent instructions](src/innovus_mcp/opencode_instructions.md). Start OpenCode:
 
 ```bash
-innovus-mcp attach --session chip
+opencode
 ```
 
-Both connect a read-only native tmux client. You can watch agent output and startup/license messages. The status line shows `MANAGED`.
+**From your design project:** copy the instructions into the project so its configuration does not depend on the source repository location:
 
-**Take control:** press `Ctrl+B`, release the keys, then press lowercase `h`. The broker pauses managed submissions and dispatch, waits for the active job, and grants writable native control. Wait for `NATIVE HUMAN CONTROL` before typing Tcl. The tmux client reconnects once during takeover; the Innovus process and its state remain intact.
-
-Type Innovus commands directly in the terminal. Native editing, completion, interactive input, and Ctrl+C retain Innovus's behavior. Human commands are captured in the session transcript without individual job IDs.
-
-**Return control:** finish native work and clear partial input, then type this at a fresh Innovus prompt:
-
-```tcl
-::innovus_mcp::release_native
+```bash
+cd /path/to/design
+cp /path/to/Innovus_MCP/src/innovus_mcp/opencode_instructions.md ./innovus-mcp-instructions.md
 ```
 
-Stop typing after that command. The broker makes the attached client read-only, verifies the returned prompt and a fresh handshake, and automatically resumes agent jobs. The terminal remains connected for viewing; press `Ctrl+B`, then `h` again for another takeover.
-
-`Ctrl+B`, then `d` detaches. Detaching during native control or losing SSH keeps agents paused. Reconnect read-only, press the takeover shortcut, finish native work, and explicitly return control. Additional viewers stay read-only. Use the printed `-r` attachment command; an uncoordinated writable attachment bypasses this cooperative ownership workflow.
-
-The CLI contains `start`, `status`, `serve`, `attach`, `stop`, and `delete`. Human job submission, polling, output/result paging, and pause/resume commands have been removed. Agent job management remains available through MCP.
-
-## Connect an agent through FastMCP
-
-Portable OpenCode configuration (also supplied as `opencode.json`); ensure OpenCode inherits PATH containing `~/.local/bin`:
+Add the following to the project's `opencode.json`. Merge the relevant fields if you already have a configuration:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": ["src/innovus_mcp/opencode_instructions.md"],
+  "instructions": ["./innovus-mcp-instructions.md"],
   "mcp": {
     "innovus": {
       "type": "local",
@@ -88,116 +118,236 @@ Portable OpenCode configuration (also supplied as `opencode.json`); ensure OpenC
 }
 ```
 
-Use the same session name for `start` and the MCP command. When overriding the session root, use the same override for both. Start Innovus separately before connecting. The stdio server is a lightweight client of the broker and does not launch another Innovus instance.
+Connection notes:
 
-Tools: `command_help`, `session_status`, `query_tcl`, `mutate_tcl`, `list_jobs`, `get_job`, `read_job_output`, `read_job_result`, `read_session_output`, `cancel_job`, and `interrupt_job`.
+- Use the same `--session` name as the running Innovus session.
+- OpenCode must inherit a PATH containing `~/.local/bin`. Alternatively, replace `command[0]` with the absolute path returned by `command -v innovus-mcp`.
+- For a custom session root, use the same path when starting the session and the MCP service. For example: `"command": ["innovus-mcp", "--root", "/data/eda_sessions", "serve", "--session", "chip"]`.
+- OpenCode Code Mode may require tool discovery before execution. The included instructions describe `search({query: "innovus command_help"})`; this client step does not execute an Innovus command.
 
-### Command usage: noninteractive help
+Once connected, try:
 
-Prefer `command_help` for command-usage questions:
+> Use Innovus MCP to explain the main usage of place_opt_design.
+
+### Other Agents Supporting stdio MCP
+
+Use the same launch arguments in your client's MCP configuration format:
+
+```json
+{
+  "command": "innovus-mcp",
+  "args": ["serve", "--session", "chip"]
+}
+```
+
+`serve` connects to an existing broker and does not launch another Innovus process. Each MCP service connects to one specified session; configure another service to connect to a different session.
+
+## 4. CLI and Human Access Through tmux
+
+### CLI Commands
+
+| Command | Purpose | Example |
+| --- | --- | --- |
+| `start` | Create a session and launch the broker, tmux, and Innovus | `innovus-mcp start --session chip` |
+| `status` | Show state, ownership, queue, and tmux attach command | `innovus-mcp status --session chip` |
+| `serve` | Provide the MCP stdio service for an agent | `innovus-mcp serve --session chip` |
+| `attach` | Connect to the real Innovus terminal, initially read-only | `innovus-mcp attach --session chip` |
+| `stop` | Stop the session while retaining logs and job records | `innovus-mcp stop --session chip` |
+| `delete` | Permanently delete records for a stopped session | `innovus-mcp delete --session chip` |
+
+`--session` defaults to `default`, except that `delete` requires an explicit session name. Common `start` options include `--cwd`, `--tmux`, `--startup-timeout` (default: 180 seconds), and `--queue-size` (default: 32 pending jobs).
+
+Agents normally launch `serve` automatically. Running it manually in a terminal waits for MCP messages. Use `attach` to enter Innovus Tcl commands yourself.
+
+### Attach, Take Control, and Release
+
+```bash
+innovus-mcp attach --session chip
+```
+
+You can also run the `attach_command` returned by `start` or `status`, which has this form:
+
+```bash
+/path/to/tmux -S /recorded/tmux.sock attach-session -r -t innovus
+```
+
+Sessions use separate sockets. The tmux target is usually named `innovus`; use the complete command returned for your session.
+
+1. The initial connection is read-only, so you can watch startup messages and agent output.
+2. Press `Ctrl+B`, release it, then press lowercase `h`. The broker pauses agent submissions and scheduling, then waits for the active job to finish before enabling human input.
+3. Once `NATIVE HUMAN CONTROL` appears, enter commands directly in Innovus. The tmux client reconnects once during handoff; the Innovus process keeps running.
+4. When finished, clear any unfinished input and run this at a fresh Innovus prompt:
+
+   ```tcl
+   ::innovus_mcp::release_native
+   ```
+
+5. Stop typing. The broker switches the terminal back to read-only and resumes the agent after confirming the prompt.
+
+Press `Ctrl+B`, then `d` to detach. Detaching or losing SSH during human control keeps the agent paused. Reconnect, take control, and explicitly release it to resume the agent. Human commands are captured in the terminal log but do not create individual managed jobs.
+
+### Stop and Delete
+
+```bash
+# Normal stop requires an idle session under managed control
+innovus-mcp stop --session chip
+
+# Force termination while busy or under human control
+innovus-mcp stop --session chip --force
+
+# Delete logs, jobs, and output files for a stopped session
+innovus-mcp delete --session chip
+```
+
+Stopping does not save the design automatically. `delete` requires a recorded state of `stopped` and confirmation that both the broker and tmux have exited. It allows for the brief broker shutdown delay after `stop` and rejects symlink session directories. The design working directory and installation remain in place. After deletion, you can reuse the session name.
+
+## 5. MCP Tools
+
+### Tool Reference
+
+| Tool | Main Parameters | Purpose |
+| --- | --- | --- |
+| `command_help` | `command`, `request_id`, `detail` | Get a full manual page or summary help without executing the requested command |
+| `query_tcl` | `script`, `request_id` | Submit a Tcl script with query intent |
+| `mutate_tcl` | `script`, `request_id` | Submit a Tcl script with mutation intent |
+| `session_status` | None | Inspect session state, input ownership, active job, queue, and output capture |
+| `list_jobs` | `after_sequence=0`, `limit=20` | List jobs in submission order, up to 100 per page |
+| `get_job` | `job_id`, `wait_ms` | Observe a job with optional bounded waiting, output summary, and Tcl result |
+| `read_job_output` | `job_id`, `offset`, `max_bytes`, `view` | Read a page of job console output |
+| `read_job_result` | `job_id`, `artifact`, `offset`, `max_bytes`, `view` | Read a page of the Tcl result, error details, or error code |
+| `read_session_output` | `offset`, `max_bytes`, `native_interval_id`, `view` | Read session logs, optionally limited to one human-control interval |
+| `cancel_job` | `job_id` | Cancel a queued job that has not started |
+| `interrupt_job` | `job_id` | Request a single Ctrl+C for the active managed job |
+
+`query_tcl` and `mutate_tcl` share the same execution mechanism. Intent labels do not enforce read-only access or provide automatic snapshots or rollback.
+
+### Submission and Observation Parameters
+
+| Tool | Default `wait_ms` | Default `max_output_bytes` | Default `max_result_bytes` |
+| --- | ---: | ---: | ---: |
+| `command_help` | 500 | 16384 | 16384 |
+| `query_tcl` / `mutate_tcl` | 0 | 16384 | 4096 |
+| `get_job` | 0 | 6144 | 4096 |
+
+- Submitting with `wait_ms=0` immediately returns job metadata. A positive value waits until the job reaches a terminal state or the budget expires, returning bounded output and any confirmed result. `get_job` can return an existing summary even without waiting.
+- Each wait is limited to 10000 ms. **A wait timeout ends only that observation; it does not cancel the Innovus command.**
+- Submission output and result page budgets are each capped at 65536 B. Console summaries from `get_job` are capped at 6144 B. Set a budget to 0 to omit that body when only status is needed.
+- `read_*` tools default to 16384 B per page, capped at 65536 B. `view="text"` returns readable text; `view="base64"` returns raw bytes encoded as Base64.
+
+### Results and Job States
+
+Console output appears in `output.text`; the Tcl return value appears in `result.text`. For example, `puts READY` prints to the console, while the value of `info patchlevel` normally appears in the Tcl result.
+
+| Field | Meaning |
+| --- | --- |
+| `job_id` | Identifier for subsequent observation, cancellation, interruption, and pagination |
+| `state` | `queued`, `running`, `succeeded`, `failed`, `cancelled`, or `unknown` |
+| `terminal` | Whether the job is in a terminal state; `unknown` is also terminal, with an unconfirmed outcome |
+| `output_bytes` | Number of job output bytes captured so far |
+| `result_bytes` / `error_info_bytes` / `error_code_bytes` | Artifact sizes; `null` means unconfirmed, while `0` means confirmed empty |
+| `next_offset` / `has_more` | Byte cursor after this page and whether more content is available |
+
+`succeeded` means Tcl returned normally. Design checks, Innovus error messages, and external program failures still require inspection of output and any dedicated status fields. `read_job_result.artifact` accepts `result`, `error_info`, or `error_code`, and defaults to `result`.
+
+For `interrupt_job`, `interrupt_sent` indicates whether this request sent Ctrl+C. The `reason` is `sent`, `already_requested`, `not_active`, or `terminal`. Repeated requests do not send additional Ctrl+C characters. An interruption receipt does not confirm that the job has exited or that changes have been rolled back.
+
+## 6. Command Handling and Optimizations
+
+| Command Type | Typical Handling | Optimizations |
+| --- | --- | --- |
+| Command documentation | `command_help` | Noninteractive manual rendering avoids man/less waiting for keyboard input; short manuals usually fit in one response |
+| Fast queries or changes | Submit with `wait_ms=500` | Return as soon as complete, with inline output/result to reduce follow-up calls |
+| Long-running jobs | Keep the job ID and continue observing with `get_job` | Execution is independent of MCP requests; bounded waits use job completion events, and agent disconnection does not cancel jobs |
+| Large console output | Capture to disk and read by cursor | Independent capture avoids tmux scrollback limits; bounded summaries limit response size |
+| Large Tcl return values | Page through the separate result artifact | Distinguishes printed output from return values and avoids repeated reads of empty artifacts |
+| Queued jobs and retries | Execute serially and deduplicate by request ID | Prevents duplicate mutations; observation waits do not hold the submission lock |
+| Commands requiring further keyboard input | Take human control through tmux | Managed jobs expect scripts that need no subsequent input; command documentation uses a dedicated tool |
+
+Take human control before starting an interactive command. A program already waiting for input in a managed job occupies the queue, and human handoff must also wait for that job to finish.
+
+### 6.1 Command Documentation
+
+Call `command_help` with parameters such as:
 
 ```json
 {
   "command": "place_opt_design",
-  "request_id": "place-opt-help-unique-001"
+  "request_id": "place-opt-help-001",
+  "detail": "full"
 }
 ```
 
-The default `detail="full"` returns the target session's manual without opening a pager. `summary`
-returns runtime syntax help. Defaults are `wait_ms=500` and 16 KiB each for output and result pages.
-Full manuals normally appear in `result.text`; summaries normally appear in `output.text`. Check both.
-The `help` receipt includes status (`ok`, `fallback`, `unavailable` or `pending`), source path, Innovus
-and documentation versions, UI mode, external exit code, and `complete`. Completeness describes
-acquisition of the requested documentation; inline pages can still have `has_more=true`.
+The default, `full`, includes purpose, syntax, and options. Use `summary` for brief runtime help. Full manuals usually appear in `result.text`; summary help usually appears in `output.text`.
 
-Full help resolves the installed manual with the running Innovus process's MANPATH, checks the UI
-and available version information, and renders the exact file with system `man -P cat`. If the
-manual is missing or mismatched, it returns runtime help in the same job with `status="fallback"`
-and `complete=false`. Unknown commands return `unavailable`. System `man` and the installed Innovus
-manuals are needed for full help; runtime summaries remain available without them.
+Full help uses the target Innovus process's MANPATH to locate the manual, checks legacy/Stylus UI and available version information, then renders the specific file with `man -P cat`. The `help` metadata reports source, version, UI, acquisition status, and external exit status:
 
-The supplied `opencode.json` loads [agent instructions](src/innovus_mcp/opencode_instructions.md). When
-copying it into another project, also copy that guide or update its `instructions` path. Once help
-is terminal and sufficient, the agent should answer directly. Do not open interactive `man` or
-`less` through `query_tcl`, or add session checks and READY probes to ordinary help queries.
+- `ok`: The requested documentation was retrieved successfully.
+- `fallback`: The full manual was missing or incompatible; summary help was attempted within the same job, with `complete=false`.
+- `unavailable`: Help for the requested command could not be retrieved.
+- `pending`: The job has not finished, so the acquisition result is unconfirmed.
 
-For every submission, supply a unique `request_id`. If a call disconnects before acknowledgment, retry the identical submission with the same ID. The live broker returns the existing job instead of executing it twice. Reusing an ID with a different script, intent, or origin is rejected.
+`help.complete=true` means the requested document was acquired in full; the inline response may still require pagination. Once enough content is available, the agent can answer without extra session checks, READY probes, or related-command queries. OpenCode tool discovery may add client steps, so one Innovus MCP call does not guarantee a single step across the entire client workflow.
 
-For short commands, use bounded waiting on submission:
+### 6.2 Fast Commands and Long-Running Jobs
+
+For a fast query, call `query_tcl`:
 
 ```json
 {
-  "script": "help dbGet",
-  "request_id": "help-dbget-unique-001",
-  "wait_ms": 500,
-  "max_output_bytes": 16384,
-  "max_result_bytes": 4096
+  "script": "dbGet head.?",
+  "request_id": "db-schema-001",
+  "wait_ms": 500
 }
 ```
 
-Both `query_tcl` and `mutate_tcl` accept these options. `wait_ms=0` (the default) returns job metadata immediately. A positive wait returns the same job metadata plus bounded `output` and, after confirmed completion, `result` pages. Reuse those pages instead of reading them again. Output and result budgets each cap at 65536 source bytes; zero omits the corresponding page. Negative budgets/waits clamp to zero; waits cap at 10000 ms. Observation options can change on an identical retry without changing the job or executing the script again.
+If the job finishes within 500 ms, use the content in that response. If its state is still `queued` or `running`, call `get_job`:
 
-If the job is still running, retain its ID and call `get_job` with `wait_ms` up to 10000. Expiry returns its current state and available output; this is an observation deadline, not an execution timeout. Disconnecting a waiter also leaves the job running. `succeeded` means Tcl returned zero; it does not certify design correctness. Errors printed by Innovus can coexist with Tcl success. Inspect the captured output when assessing a command.
-
-## Output and results
-
-Output pages default to 16 KiB and are capped at 64 KiB of source bytes. Each response includes `next_offset`, `available_bytes`, and `has_more`. Each reader has its own cursor. An empty page on a running job means no new output yet. `view="base64"` returns exact bytes; text mode replaces invalid UTF-8 and strips terminal formatting. Offsets always count source bytes.
-
-The Tcl return value is separate from console output. Use `read_job_result` with `artifact="result"`, `"error_info"`, or `"error_code"`. Results are published after job completion, including large query return values. Native activity is accessible through `read_session_output`, optionally using the `native_interval_id` reported by status.
-
-Completed jobs include `result_bytes`, `error_info_bytes`, and `error_code_bytes`. `0` means the artifact is empty and needs no additional read; `null` means its size has not been confirmed (including queued/running jobs and outcomes without confirmed completion). `get_job` includes up to 4096 bytes of the Tcl result by default; set `max_result_bytes=0` for metadata and output only.
-
-`get_job` uses a single `output` page for up to 6144 bytes of console output. For larger output, it returns disjoint `output` (first 2048 bytes) and `output_tail` (last 4096 bytes) pages, with `summary_truncated=true`. `max_output_bytes` can lower that combined summary budget; zero omits both pages. These page objects replace the earlier `head` and `tail` text fields. Their offsets always refer to the original output bytes. For a truncated summary, read the missing middle starting at `output.next_offset`, stopping at `output_tail.offset` if the tail has already been consumed. For a contiguous submission page, continue from `output.next_offset`. Check `has_more` for the current snapshot; running jobs may emit more bytes later even when it is currently false.
-
-The raw session transcript is `pane.raw`; job output indexes exclude control markers. Files are retained until the operator deletes the stopped session. Disk usage grows with emitted output. Background subprocess output is attributed by arrival interval and may not match its originating command.
-
-## Cancel, interrupt, and stop
-
-```bash
-innovus-mcp stop --session chip
-# Explicit termination of busy/native/unresponsive sessions:
-innovus-mcp stop --session chip --force
+```json
+{
+  "job_id": "<job_id returned by submission>",
+  "wait_ms": 10000
+}
 ```
 
-Agents use the MCP `cancel_job` and `interrupt_job` tools. Only queued cancellation guarantees that no command ran. Interruption requests one Ctrl+C and does not imply completion or rollback. `interrupt_sent` reports this call's action; `reason` is `sent`, `already_requested`, `not_active`, or `terminal`. Repeating the request sends no additional Ctrl+C. A normal native handoff waits for the active job, so it cannot directly take over a job stuck in a pager. Prefer `command_help` and noninteractive options for managed jobs.
+Use `mutate_tcl` for long-running changes. After a wait expires, keep observing the same job instead of resubmitting the command. New jobs queue while the session is busy; human handoff pauses managed submissions and scheduling.
 
-Stop performs no automatic design save. Disconnecting clients leaves the session running. If the broker exits, tmux and a healthy capture writer can continue, but v1 does not reconstruct the broker or replay jobs. The session manifest records the tmux socket for manual attachment:
+Use a unique `request_id` for each new submission. Within the same broker lifetime, retrying the same script, origin, and intent with the same ID returns the original job. Reusing the ID for different execution content is rejected. Retries may change the wait duration or output budgets.
 
-```bash
-/path/to/tmux -S /recorded/tmux.sock attach-session -t innovus
+### 6.3 Large Output and Return Values
+
+An independent tmux `pipe-pane` consumer continuously writes output to `pane.raw`. Reads use job output indexes on disk, so agents do not depend on screenshots or finite tmux scrollback.
+
+- Reuse inline pages first and read further only when needed. `offset` and `next_offset` are **raw byte offsets**, not text character counts.
+- `get_job` returns small output once. When output exceeds the default summary budget, it returns nonoverlapping head and tail sections of 2048 B and 4096 B, with `summary_truncated=true`.
+- To fill the gap in a summary, read from `output.next_offset` up to the already-read `output_tail.offset`. For a contiguous submission page, continue directly from its `next_offset`.
+- While a job is running, `has_more=false` means only that the current snapshot has been read. More output may arrive; use `terminal` to determine whether the job has ended.
+
+To read more of a Tcl return value, call `read_job_result`:
+
+```json
+{
+  "job_id": "<job_id returned by submission>",
+  "artifact": "result",
+  "offset": 16384,
+  "max_bytes": 65536
+}
 ```
 
-An unavailable session or incomplete capture is reported explicitly. Do not treat unknown job outcomes as safe to retry with a new request ID.
+Replace `16384` with the actual `next_offset` from the preceding page. Console output has a separate cursor through `read_job_output`. Skip reads for artifacts with a confirmed size of 0. Use `view="base64"` when preserving exact bytes.
 
-### Delete a stopped session
+## 7. Data Directories and Updates
 
-```bash
-innovus-mcp stop --session chip
-innovus-mcp delete --session chip
+Session data defaults to `~/.local/innovus_MCP/sessions/<session>`, separate from the installation and design working directory. It includes `session.json`, broker logs, `pane.raw`, job scripts, results, and output indexes. Disk usage grows with output; use `delete` after stopping a session to remove its records.
 
-# With a custom session root:
-innovus-mcp --root /path/to/sessions delete --session chip
-```
-
-`delete` permanently removes that session's directory, including logs, captured output and job
-results. Supply `--session` explicitly. The session manifest must report `stopped`, and both broker
-and tmux endpoints must be inactive. A short broker shutdown interval after `stop` is handled
-automatically. Running or unconfirmed sessions and symlinked session directories are rejected.
-`--root` and `INNOVUS_MCP_ROOT` follow the same rules as the other commands. Deletion leaves the
-design working directory and installed software in place; the removed session name can be reused.
-
-## Development
-
-For an editable development environment:
+Storage precedence is: `--root` > `INNOVUS_MCP_ROOT` > the HOME default. Place `--root` before the subcommand:
 
 ```bash
-python3.11 -m venv .venv
-.venv/bin/python -m pip install -e '.[dev]'
-.venv/bin/ruff check src
-bash -n scripts/install.sh
+innovus-mcp --root /data/eda_sessions start --session chip --cwd /path/to/design
+innovus-mcp --root /data/eda_sessions status --session chip
 ```
 
-Existing broker processes keep their loaded code: reconnecting the MCP adapter alone does not
-activate broker changes. Use a new session to load an update, or stop an existing session after
-saving its design and start a new one. V1 does not reattach a replacement broker to an existing
-Innovus process.
+You can also set `INNOVUS_MCP_ROOT` consistently in the session startup and agent environments. Local communication sockets use short paths under `/tmp/imcp-UID-ID/`.
+
+After updating the source, run `bash scripts/install.sh` again. **Existing brokers do not reload code.** Save any required design state, then use a new session or stop and recreate the old one. Point the agent configuration to the corresponding session name.
+
+V1 does not provide memory, automatic recovery, or command protection. Closing an MCP client does not stop independently running jobs. If the broker exits, tmux and capture processes may continue, but this version cannot rebuild the broker to take over those processes. Copying session files to another machine preserves records; it cannot restore a running Innovus database or process.
